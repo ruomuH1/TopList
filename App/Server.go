@@ -13,7 +13,10 @@ import (
 func GetTypeInfo(w http.ResponseWriter, r *http.Request) {
 	err := r.ParseForm()
 	if err != nil {
-		log.Fatal("系统错误" + err.Error())
+		log.Println("系统错误" + err.Error())
+		w.Header().Add("Access-Control-Allow-Origin", "*")
+		fmt.Fprintf(w, "%s", `{"Code":1,"Message":"系统错误","Data":[]}`)
+		return
 	}
 	id := r.Form.Get("id")
 	re := regexp.MustCompile("[0-9]+")

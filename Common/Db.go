@@ -130,7 +130,12 @@ sql.Open函数实际上是返回一个连接池对象，不是单个连接。
 //}
 
 func (MySql MySql) GetConn() *MySql {
-	MySql.conn = GlobalDb
+	if GlobalDb != nil {
+		MySql.conn = GlobalDb
+	} else {
+		// 如果数据库连接失败，创建一个空的连接对象，避免程序崩溃
+		log.Println("数据库连接失败，使用空连接对象")
+	}
 	return &MySql
 }
 
@@ -193,6 +198,10 @@ func (MySql *MySql) OrderByString(orderString ...string) *MySql {
 更新方法
 */
 func (MySql MySql) Update(tableName string, str map[string]string) int64 {
+	if MySql.conn == nil {
+		log.Println("数据库连接失败，无法执行Update操作")
+		return 0
+	}
 	var tempStr = ""
 	var allValue []interface{}
 	for key, value := range str {
@@ -207,6 +216,7 @@ func (MySql MySql) Update(tableName string, str map[string]string) int64 {
 	res, err := stmt.Exec(allValue...)
 	MySql.checkErr(err)
 	rows, err := res.RowsAffected()
+	MySql.checkErr(err)
 	return rows
 
 }
@@ -215,6 +225,10 @@ func (MySql MySql) Update(tableName string, str map[string]string) int64 {
 删除方法
 */
 func (MySql MySql) Delete(tableName string) int64 {
+	if MySql.conn == nil {
+		log.Println("数据库连接失败，无法执行Delete操作")
+		return 0
+	}
 	var tempStr = ""
 	tempStr = "delete from " + tableName + MySql.whereStr
 	fmt.Println(tempStr)
@@ -223,6 +237,7 @@ func (MySql MySql) Delete(tableName string) int64 {
 	res, err := stmt.Exec()
 	MySql.checkErr(err)
 	rows, err := res.RowsAffected()
+	MySql.checkErr(err)
 	return rows
 }
 
@@ -230,6 +245,10 @@ func (MySql MySql) Delete(tableName string) int64 {
 插入方法
 */
 func (MySql MySql) Insert(tableName string, data map[string]string) int64 {
+	if MySql.conn == nil {
+		log.Println("数据库连接失败，无法执行Insert操作")
+		return 0
+	}
 	var allField = ""
 	var allValue = ""
 	var allTrueValue []interface{}
@@ -254,6 +273,7 @@ func (MySql MySql) Insert(tableName string, data map[string]string) int64 {
 	}
 	MySql.checkErr(err)
 	id, err := res.LastInsertId()
+	MySql.checkErr(err)
 	return id
 }
 
@@ -261,6 +281,14 @@ func (MySql MySql) Insert(tableName string, data map[string]string) int64 {
 分页查询
 */
 func (MySql MySql) Pagination(Page int, Limit int) map[string]interface{} {
+	if MySql.conn == nil {
+		log.Println("数据库连接失败，无法执行Pagination操作")
+		return map[string]interface{}{
+			"totalPage":    0,
+			"currentPage": 1,
+			"rows":        []interface{}{},
+		}
+	}
 	res := MySql.GetConn().Select(MySql.tableName, []string{"count(*) as count"}).QueryRow()
 	count, _ := strconv.Atoi(res["count"])
 	// 计算总页码数
@@ -275,10 +303,24 @@ func (MySql MySql) Pagination(Page int, Limit int) map[string]interface{} {
 	setOff := (Page - 1) * Limit
 	queryStr := MySql.fields + MySql.whereStr + MySql.orderBy + " limit " + strconv.Itoa(setOff) + "," + strconv.Itoa(Limit)
 	rows, err := MySql.conn.Query(queryStr)
+	if err != nil {
+		log.Println("查询失败:", err)
+		return map[string]interface{}{
+			"totalPage":    0,
+			"currentPage": 1,
+			"rows":        []interface{}{},
+		}
+	}
 	defer rows.Close()
-	MySql.checkErr(err)
 	Column, err := rows.Columns()
-	MySql.checkErr(err)
+	if err != nil {
+		log.Println("获取列失败:", err)
+		return map[string]interface{}{
+			"totalPage":    0,
+			"currentPage": 1,
+			"rows":        []interface{}{},
+		}
+	}
 	// 创建一个查询字段类型的slice
 	values := make([]sql.RawBytes, len(Column))
 	// 创建一个任意字段类型的slice
@@ -308,12 +350,22 @@ func (MySql MySql) Pagination(Page int, Limit int) map[string]interface{} {
 }
 
 func (MySql MySql) QueryAll() []map[string]string {
+	if MySql.conn == nil {
+		log.Println("数据库连接失败，无法执行QueryAll操作")
+		return []map[string]string{}
+	}
 	var queryStr = MySql.fields + MySql.whereStr + MySql.orderBy + MySql.limitNumber
 	rows, err := MySql.conn.Query(queryStr)
+	if err != nil {
+		log.Println("查询失败:", err)
+		return []map[string]string{}
+	}
 	defer rows.Close()
-	MySql.checkErr(err)
 	Column, err := rows.Columns()
-	MySql.checkErr(err)
+	if err != nil {
+		log.Println("获取列失败:", err)
+		return []map[string]string{}
+	}
 	// 创建一个查询字段类型的slice
 	values := make([]sql.RawBytes, len(Column))
 	// 创建一个任意字段类型的slice
@@ -339,11 +391,21 @@ func (MySql MySql) QueryAll() []map[string]string {
 }
 
 func (MySql MySql) ExecSql(queryStr string) []map[string]string {
+	if MySql.conn == nil {
+		log.Println("数据库连接失败，无法执行ExecSql操作")
+		return []map[string]string{}
+	}
 	rows, err := MySql.conn.Query(queryStr)
+	if err != nil {
+		log.Println("查询失败:", err)
+		return []map[string]string{}
+	}
 	defer rows.Close()
-	MySql.checkErr(err)
 	Column, err := rows.Columns()
-	MySql.checkErr(err)
+	if err != nil {
+		log.Println("获取列失败:", err)
+		return []map[string]string{}
+	}
 	// 创建一个查询字段类型的slice
 	values := make([]sql.RawBytes, len(Column))
 	// 创建一个任意字段类型的slice
@@ -372,11 +434,22 @@ func (MySql MySql) ExecSql(queryStr string) []map[string]string {
 查询单行
 */
 func (MySql MySql) QueryRow() map[string]string {
+	if MySql.conn == nil {
+		log.Println("数据库连接失败，无法执行QueryRow操作")
+		return map[string]string{}
+	}
 	var queryStr = MySql.fields + MySql.whereStr + MySql.orderBy + MySql.limitNumber
 	result, err := MySql.conn.Query(queryStr)
+	if err != nil {
+		log.Println("查询失败:", err)
+		return map[string]string{}
+	}
 	defer result.Close()
-	MySql.checkErr(err)
 	Column, err := result.Columns()
+	if err != nil {
+		log.Println("获取列失败:", err)
+		return map[string]string{}
+	}
 	// 创建一个查询字段类型的slice的键值对
 	values := make([]sql.RawBytes, len(Column))
 	// 创建一个任意字段类型的slice的键值对
@@ -404,6 +477,6 @@ func (MySql MySql) QueryRow() map[string]string {
 */
 func (MySql MySql) checkErr(err error) {
 	if err != nil {
-		log.Fatal("错误：", err)
+		log.Println("错误：", err)
 	}
 }
