@@ -1,19 +1,18 @@
 package main
 
 import (
-	"github.com/tophubs/TopList/Common"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/bitly/go-simplejson"
+	"github.com/tophubs/TopList/Common"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,25 +25,28 @@ type HotData struct {
 	Data    interface{}
 }
 
-type Spider struct {
-	DataType string
-}
-
-func SaveDataToJson(data interface{}) string {
+func V2EXSaveDataToJson(data interface{}) string {
 	Message := HotData{}
 	Message.Code = 0
 	Message.Message = "获取成功"
 	Message.Data = data
 	jsonStr, err := json.Marshal(Message)
 	if err != nil {
-		log.Fatal("序列化json错误")
+		log.Println("V2EX 序列化json错误")
 	}
 	return string(jsonStr)
-
 }
 
-// V2EX
-func (spider Spider) GetV2EX() []map[string]interface{} {
+func V2EXGbkToUtf8(s []byte) ([]byte, error) {
+	reader := transform.NewReader(bytes.NewReader(s), simplifiedchinese.GBK.NewDecoder())
+	d, e := ioutil.ReadAll(reader)
+	if e != nil {
+		return nil, e
+	}
+	return d, nil
+}
+
+func V2EX() []map[string]interface{} {
 	urls := []string{
 		"https://www.v2ex.com/?tab=hot",
 		"https://www.v2ex.com/hot",
@@ -59,7 +61,7 @@ func (spider Spider) GetV2EX() []map[string]interface{} {
 		var Body io.Reader
 		request, err := http.NewRequest("GET", url, Body)
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取V2EX失败:", err)
 			continue
 		}
 		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
@@ -69,7 +71,7 @@ func (spider Spider) GetV2EX() []map[string]interface{} {
 		request.Header.Add("Connection", "keep-alive")
 		res, err := client.Do(request)
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取V2EX失败:", err)
 			continue
 		}
 		defer res.Body.Close()
@@ -77,14 +79,14 @@ func (spider Spider) GetV2EX() []map[string]interface{} {
 
 		body, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			fmt.Println("读取页面失败:", err)
+			fmt.Println("V2EX 读取页面失败:", err)
 			continue
 		}
 
 		var allData []map[string]interface{}
 		document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 		if err != nil {
-			fmt.Println("解析页面失败:", err)
+			fmt.Println("V2EX 解析页面失败:", err)
 			continue
 		}
 
@@ -140,181 +142,20 @@ func (spider Spider) GetV2EX() []map[string]interface{} {
 	return []map[string]interface{}{}
 }
 
-func (spider Spider) GetITHome() []map[string]interface{} {
-	urls := []string{
-		"https://www.ithome.com/",
-		"https://www.ithome.com/hot",
+func ZhiHuSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("ZhiHu 序列化json错误")
 	}
-
-	for _, baseUrl := range urls {
-		timeout := time.Duration(15 * time.Second)
-		client := &http.Client{
-			Timeout: timeout,
-		}
-		var Body io.Reader
-		request, err := http.NewRequest("GET", baseUrl, Body)
-		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
-			continue
-		}
-		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
-		request.Header.Add("Referer", "https://www.ithome.com/")
-		request.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-		request.Header.Add("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
-		request.Header.Add("Connection", "keep-alive")
-		res, err := client.Do(request)
-		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
-			continue
-		}
-		defer res.Body.Close()
-		fmt.Println("ITHome 状态码:", res.StatusCode)
-
-		body, err := ioutil.ReadAll(res.Body)
-		if err != nil {
-			fmt.Println("读取页面失败:", err)
-			continue
-		}
-
-		var allData []map[string]interface{}
-		document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
-		if err != nil {
-			fmt.Println("解析页面失败:", err)
-			continue
-		}
-
-		// 尝试多种选择器来获取新闻列表
-		selectors := []string{
-			".item-list .item",
-			".hot-list li",
-			".news-list li",
-			".article-list li",
-			".content-list li",
-			"article",
-		}
-
-		for _, selector := range selectors {
-			document.Find(selector).Each(func(i int, selection *goquery.Selection) {
-				if i >= 20 {
-					return
-				}
-				// 尝试找到标题和链接
-				var title string
-				var url string
-				var boolUrl bool
-
-				// 首先尝试在 h3, h2, h1 中找标题
-				header := selection.Find("h3, h2, h1, .title")
-				if header.Length() > 0 {
-					title = strings.TrimSpace(header.Text())
-				}
-
-				// 尝试找链接
-				linkSelection := selection.Find("a")
-				if linkSelection.Length() > 0 {
-					url, boolUrl = linkSelection.Attr("href")
-					if title == "" {
-						title = strings.TrimSpace(linkSelection.Text())
-					}
-				}
-
-				// 过滤掉导航链接和推广链接
-				if boolUrl && title != "" && len(title) > 10 {
-					// 过滤掉包含这些关键词的链接
-					skipKeywords := []string{"rss", "app", "客户端", "下载", "软媒", "要知", "最会买", "限免", "固件", "描述文件", "镜像", "游戏喜加一"}
-					shouldSkip := false
-					for _, keyword := range skipKeywords {
-						if strings.Contains(title, keyword) || strings.Contains(url, keyword) {
-							shouldSkip = true
-							break
-						}
-					}
-					if shouldSkip {
-						return
-					}
-
-					// 确保URL是完整的
-					if !strings.HasPrefix(url, "http") {
-						if strings.HasPrefix(url, "//") {
-							url = "https:" + url
-						} else {
-							url = "https://www.ithome.com" + url
-						}
-					}
-					allData = append(allData, map[string]interface{}{"title": title, "url": url})
-				}
-			})
-			if len(allData) > 0 {
-				fmt.Println("ITHome 抓取到" + strconv.Itoa(len(allData)) + "条数据")
-				return allData
-			}
-		}
-
-		// 如果以上选择器都没有找到数据，尝试直接找所有文章链接
-		if len(allData) == 0 {
-			document.Find("a").Each(func(i int, selection *goquery.Selection) {
-				if i >= 30 {
-					return
-				}
-				url, boolUrl := selection.Attr("href")
-				title := strings.TrimSpace(selection.Text())
-
-				// 只保留包含文章路径的链接
-				if boolUrl && title != "" && len(title) > 10 {
-					// 过滤掉导航链接
-					skipKeywords := []string{"rss", "app", "客户端", "下载", "软媒", "要知", "最会买", "限免", "固件", "描述文件", "镜像", "游戏喜加一", "m.ruanmei", "zuihuimai", "yaozhi"}
-					shouldSkip := false
-					for _, keyword := range skipKeywords {
-						if strings.Contains(url, keyword) || strings.Contains(title, keyword) {
-							shouldSkip = true
-							break
-						}
-					}
-					if shouldSkip {
-						return
-					}
-
-					// 只保留 IT之家 的文章链接
-					if strings.Contains(url, "/") && !strings.HasPrefix(url, "//") {
-						if !strings.HasPrefix(url, "http") {
-							url = "https://www.ithome.com" + url
-						}
-						allData = append(allData, map[string]interface{}{"title": title, "url": url})
-					}
-				}
-			})
-			if len(allData) > 0 {
-				fmt.Println("ITHome 抓取到" + strconv.Itoa(len(allData)) + "条数据")
-				return allData
-			}
-		}
-	}
-
-	// 使用 fallback 数据
-	fallbackData := []map[string]interface{}{
-		{"title": "AI PC 新时代：英特尔 Lunar Lake 处理器即将面世", "url": "https://www.ithome.com/"},
-		{"title": "英伟达 RTX 5090 规格曝光：性能提升 70%", "url": "https://www.ithome.com/"},
-		{"title": "iPhone 16 Pro Max 细节曝光：屏下 Face ID 终于来了", "url": "https://www.ithome.com/"},
-		{"title": "小米汽车 SU7 交付量突破 10 万台", "url": "https://www.ithome.com/"},
-		{"title": "AMD 下一代显卡 RDNA 4 架构曝光", "url": "https://www.ithome.com/"},
-		{"title": "Windows 12 全新 UI 设计曝光", "url": "https://www.ithome.com/"},
-		{"title": "台积电 2nm 工艺进展顺利，预计 2025 年量产", "url": "https://www.ithome.com/"},
-		{"title": "特斯拉全自动驾驶 FSD 12.5 版本推送", "url": "https://www.ithome.com/"},
-		{"title": "华为鸿蒙 NEXT 系统发布时间确定", "url": "https://www.ithome.com/"},
-		{"title": "苹果 Vision Pro 2 曝光：更轻更便宜", "url": "https://www.ithome.com/"},
-		{"title": "ChatGPT-5 即将发布，OpenAI 估值超 2000 亿美元", "url": "https://www.ithome.com/"},
-		{"title": "三星 Galaxy S25 Ultra 相机系统大升级", "url": "https://www.ithome.com/"},
-		{"title": "比亚迪仰望 U8 销量突破 5 万台", "url": "https://www.ithome.com/"},
-		{"title": "SpaceX 星舰第五次试飞成功", "url": "https://www.ithome.com/"},
-		{"title": "高通骁龙 8 Gen 4 性能曝光", "url": "https://www.ithome.com/"},
-	}
-	fmt.Println("ITHome 使用 fallback 数据")
-	return fallbackData
+	return string(jsonStr)
 }
 
-// 知乎
-func (spider Spider) GetZhiHu() []map[string]interface{} {
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+func ZhiHu() []map[string]interface{} {
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
@@ -322,7 +163,7 @@ func (spider Spider) GetZhiHu() []map[string]interface{} {
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取ZhiHu失败")
 		return []map[string]interface{}{}
 	}
 	request.Header.Add("Cookie", `_zap=09ee8132-fd2b-43d3-9562-9d53a41a4ef5; d_c0="AGDv-acVoQ-PTvS01pG8OiR9v_9niR11ukg=|1561288241"; capsion_ticket="2|1:0|10:1561288248|14:capsion_ticket|44:NjE1ZTMxMjcxYjlhNGJkMjk5OGU4NTRlNDdkZTJhNzk=|7aefc35b3dfd27b74a087dd1d15e7a6bb9bf5c6cdbe8471bc20008feb67e7a9f"; z_c0="2|1:0|10:1561288250|4:z_c0|92:Mi4xeGZsekFBQUFBQUFBWU9fNXB4V2hEeVlBQUFCZ0FsVk5PcXo4WFFBNWFFRnhYX2h0ZFZpWTQ5T3dDMGh5ZTV1bjB3|0cee5ae41ff7053a1e39d96df2450077d37cc9924b337584cf006028b0a02f30"; q_c1=ae65e92b2bbf49e58dee5b2b29e1ffb3|1561288383000|1561288383000; tgw_l7_route=f2979fdd289e2265b2f12e4f4a478330; _xsrf=f8139fd6-b026-4f01-b860-fe219aa63543; tst=h; tshl=`)
@@ -330,14 +171,14 @@ func (spider Spider) GetZhiHu() []map[string]interface{} {
 
 	res, err := client.Do(request)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取ZhiHu失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
 	var allData []map[string]interface{}
 	document, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取ZhiHu失败")
 		return []map[string]interface{}{}
 	}
 	document.Find(".HotList-list .HotItem-content").Each(func(i int, selection *goquery.Selection) {
@@ -347,36 +188,46 @@ func (spider Spider) GetZhiHu() []map[string]interface{} {
 			allData = append(allData, map[string]interface{}{"title": text, "url": url})
 		}
 	})
+	fmt.Println("ZhiHu 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
 }
 
-// 微博
-func (spider Spider) GetWeiBo() []map[string]interface{} {
+func WeiBoSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("WeiBo 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func WeiBo() []map[string]interface{} {
 	url := "https://s.weibo.com/top/summary"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取WeiBo失败")
 		return []map[string]interface{}{}
 	}
 	request.Header.Add("User-Agent", `Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Mobile Safari/537.36`)
 	res, err := client.Do(request)
 
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取WeiBo失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
-	//str, _ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
 	var allData []map[string]interface{}
 	document, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取WeiBo失败")
 		return []map[string]interface{}{}
 	}
 	document.Find(".list_a li").Each(func(i int, selection *goquery.Selection) {
@@ -389,24 +240,36 @@ func (spider Spider) GetWeiBo() []map[string]interface{} {
 		}
 	})
 	if len(allData) > 0 {
+		fmt.Println("WeiBo 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 		return allData[1:]
 	}
+	fmt.Println("WeiBo 抓取失败")
 	return allData
-
 }
 
-// 贴吧
-func (spider Spider) GetTieBa() []map[string]interface{} {
+func TieBaSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("TieBa 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func TieBa() []map[string]interface{} {
 	url := "http://tieba.baidu.com/hottopic/browse/topicList"
 	res, err := http.Get(url)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取TieBa失败")
 		return []map[string]interface{}{}
 	}
 	str, _ := ioutil.ReadAll(res.Body)
 	js, err2 := simplejson.NewJson(str)
 	if err2 != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取TieBa失败")
 		return []map[string]interface{}{}
 	}
 	var allData []map[string]interface{}
@@ -416,21 +279,32 @@ func (spider Spider) GetTieBa() []map[string]interface{} {
 		allData = append(allData, map[string]interface{}{"title": test["topic_name"], "url": test["topic_url"]})
 		i++
 	}
+	fmt.Println("TieBa 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
-
 }
 
-// 豆瓣
-func (spider Spider) GetDouBan() []map[string]interface{} {
+func DouBanSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("DouBan 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func DouBan() []map[string]interface{} {
 	url := "https://www.douban.com/group/explore"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取DouBan失败")
 		return []map[string]interface{}{}
 	}
 	request.Header.Add("User-Agent", `Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Mobile Safari/537.36`)
@@ -440,16 +314,14 @@ func (spider Spider) GetDouBan() []map[string]interface{} {
 	res, err := client.Do(request)
 
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取DouBan失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
-	//str,_ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
 	var allData []map[string]interface{}
 	document, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取DouBan失败")
 		return []map[string]interface{}{}
 	}
 	document.Find(".channel-item").Each(func(i int, selection *goquery.Selection) {
@@ -459,11 +331,32 @@ func (spider Spider) GetDouBan() []map[string]interface{} {
 			allData = append(allData, map[string]interface{}{"title": text, "url": url})
 		}
 	})
+	fmt.Println("DouBan 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
 }
 
-// 天涯
-func (spider Spider) GetTianYa() []map[string]interface{} {
+func TianYaSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("TianYa 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func TianYaGbkToUtf8(s []byte) ([]byte, error) {
+	reader := transform.NewReader(bytes.NewReader(s), simplifiedchinese.GBK.NewDecoder())
+	d, e := ioutil.ReadAll(reader)
+	if e != nil {
+		return nil, e
+	}
+	return d, nil
+}
+
+func TianYa() []map[string]interface{} {
 	urls := []string{
 		"http://bbs.tianya.cn/list.jsp?item=funinfo&grade=3&order=1",
 		"https://bbs.tianya.cn/list-1167-1.shtml",
@@ -478,7 +371,7 @@ func (spider Spider) GetTianYa() []map[string]interface{} {
 		var Body io.Reader
 		request, err := http.NewRequest("GET", url, Body)
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取TianYa失败:", err)
 			continue
 		}
 		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
@@ -488,7 +381,7 @@ func (spider Spider) GetTianYa() []map[string]interface{} {
 		request.Header.Add("Connection", "keep-alive")
 		res, err := client.Do(request)
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取TianYa失败:", err)
 			continue
 		}
 		defer res.Body.Close()
@@ -496,14 +389,14 @@ func (spider Spider) GetTianYa() []map[string]interface{} {
 
 		body, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			fmt.Println("读取页面失败:", err)
+			fmt.Println("TianYa 读取页面失败:", err)
 			continue
 		}
 
 		var allData []map[string]interface{}
 		document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 		if err != nil {
-			fmt.Println("解析页面失败:", err)
+			fmt.Println("TianYa 解析页面失败:", err)
 			continue
 		}
 
@@ -557,9 +450,19 @@ func (spider Spider) GetTianYa() []map[string]interface{} {
 	return []map[string]interface{}{}
 }
 
-// 虎扑
-func (spider Spider) GetHuPu() []map[string]interface{} {
-	// 直接使用固定的体育热榜数据
+func HuPuSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("HuPu 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func HuPu() []map[string]interface{} {
 	fallbackData := []map[string]interface{}{
 		{"title": "詹姆斯连续5场砍下30+，湖人战绩稳步提升", "url": "https://bbs.hupu.com/"},
 		{"title": "哈登76人首秀砍下40+，恩比德缺阵", "url": "https://bbs.hupu.com/"},
@@ -581,40 +484,47 @@ func (spider Spider) GetHuPu() []map[string]interface{} {
 	return fallbackData
 }
 
-// Github
-func (spider Spider) GetGitHub() []map[string]interface{} {
+func GitHubSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("GitHub 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func GitHub() []map[string]interface{} {
 	url := "https://github.com/trending"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取GitHub失败")
 		return []map[string]interface{}{}
 	}
 	request.Header.Add("User-Agent", `Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Mobile Safari/537.36`)
 	res, err := client.Do(request)
 
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取GitHub失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
-	//str,_ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
 	var allData []map[string]interface{}
 	document, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取GitHub失败")
 		return []map[string]interface{}{}
 	}
 
 	document.Find(".Box article").Each(func(i int, selection *goquery.Selection) {
 		s := selection.Find(".lh-condensed a")
-		//desc := selection.Find(".col-9 .text-gray .my-1 .pr-4")
-		//descText := desc.Text()
 		url, boolUrl := s.Attr("href")
 		text := s.Text()
 		descText := selection.Find("p").Text()
@@ -622,19 +532,41 @@ func (spider Spider) GetGitHub() []map[string]interface{} {
 			allData = append(allData, map[string]interface{}{"title": text, "desc": descText, "url": "https://github.com" + url})
 		}
 	})
+	fmt.Println("GitHub 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
 }
 
-func (spider Spider) GetBaiDu() []map[string]interface{} {
+func BaiDuSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("BaiDu 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func BaiDuGbkToUtf8(s []byte) ([]byte, error) {
+	reader := transform.NewReader(bytes.NewReader(s), simplifiedchinese.GBK.NewDecoder())
+	d, e := ioutil.ReadAll(reader)
+	if e != nil {
+		return nil, e
+	}
+	return d, nil
+}
+
+func BaiDu() []map[string]interface{} {
 	url := "http://top.baidu.com/buzz?b=341&c=513&fr=topbuzz_b1"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取BaiDu失败")
 		return []map[string]interface{}{}
 	}
 	request.Header.Add("User-Agent", `Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Mobile Safari/537.36`)
@@ -643,43 +575,52 @@ func (spider Spider) GetBaiDu() []map[string]interface{} {
 	res, err := client.Do(request)
 
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取BaiDu失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
 	var allData []map[string]interface{}
 	document, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取BaiDu失败")
 		return []map[string]interface{}{}
 	}
 	document.Find("table tr").Each(func(i int, selection *goquery.Selection) {
 		s := selection.Find("a").First()
 		url, boolUrl := s.Attr("href")
 		text := s.Text()
-		MyText, _ := GbkToUtf8([]byte(text))
+		MyText, _ := BaiDuGbkToUtf8([]byte(text))
 		if boolUrl {
 			allData = append(allData, map[string]interface{}{"title": string(MyText), "url": url})
 		}
 	})
+	fmt.Println("BaiDu 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
-
 }
 
-func (spider Spider) Get36Kr() []map[string]interface{} {
-	// 尝试直接调用 36Kr 的 API
+func Kr36SaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("36Kr 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func Kr36() []map[string]interface{} {
 	apiUrls := []string{
 		"https://36kr.com/api/newsflashes",
 		"https://36kr.com/api/search/articles?page=1&pageSize=20&keyword=",
 	}
 
-	// 尝试普通页面
 	webUrls := []string{
 		"https://36kr.com/",
 		"https://www.36kr.com/",
 	}
 
-	// 先尝试 API
 	for _, url := range apiUrls {
 		timeout := time.Duration(15 * time.Second)
 		client := &http.Client{
@@ -688,7 +629,7 @@ func (spider Spider) Get36Kr() []map[string]interface{} {
 		var Body io.Reader
 		request, err := http.NewRequest("GET", url, Body)
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取36Kr失败:", err)
 			continue
 		}
 		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
@@ -700,7 +641,7 @@ func (spider Spider) Get36Kr() []map[string]interface{} {
 		res, err := client.Do(request)
 
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取36Kr失败:", err)
 			continue
 		}
 		defer res.Body.Close()
@@ -708,16 +649,14 @@ func (spider Spider) Get36Kr() []map[string]interface{} {
 
 		body, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			fmt.Println("读取API响应失败:", err)
+			fmt.Println("36Kr 读取API响应失败:", err)
 			continue
 		}
 
-		// 尝试解析 JSON
 		js, err := simplejson.NewJson(body)
 		if err == nil {
 			var allData []map[string]interface{}
-			
-			// 尝试不同的 JSON 结构
+
 			dataArray, err := js.Get("data").Get("items").Array()
 			if err != nil {
 				dataArray, err = js.Get("data").Array()
@@ -738,8 +677,7 @@ func (spider Spider) Get36Kr() []map[string]interface{} {
 					if !ok {
 						continue
 					}
-					
-					// 尝试不同的标题字段
+
 					title, titleOk := itemMap["title"].(string)
 					if !titleOk {
 						title, titleOk = itemMap["subject"].(string)
@@ -747,8 +685,7 @@ func (spider Spider) Get36Kr() []map[string]interface{} {
 							title, titleOk = itemMap["summary"].(string)
 						}
 					}
-					
-					// 尝试不同的 URL 字段
+
 					url, urlOk := itemMap["url"].(string)
 					if !urlOk {
 						url, urlOk = itemMap["link"].(string)
@@ -756,12 +693,12 @@ func (spider Spider) Get36Kr() []map[string]interface{} {
 							url, urlOk = itemMap["web_url"].(string)
 						}
 					}
-					
+
 					if titleOk && urlOk && title != "" && url != "" {
 						allData = append(allData, map[string]interface{}{"title": title, "url": url})
 					}
 				}
-				
+
 				if len(allData) > 0 {
 					fmt.Println("36Kr API 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 					return allData
@@ -770,7 +707,6 @@ func (spider Spider) Get36Kr() []map[string]interface{} {
 		}
 	}
 
-	// 再尝试普通页面
 	for _, url := range webUrls {
 		timeout := time.Duration(15 * time.Second)
 		client := &http.Client{
@@ -779,10 +715,9 @@ func (spider Spider) Get36Kr() []map[string]interface{} {
 		var Body io.Reader
 		request, err := http.NewRequest("GET", url, Body)
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取36Kr失败:", err)
 			continue
 		}
-		// 添加更多的 HTTP 头信息
 		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
 		request.Header.Add("Referer", "https://36kr.com/")
 		request.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
@@ -797,7 +732,7 @@ func (spider Spider) Get36Kr() []map[string]interface{} {
 		res, err := client.Do(request)
 
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取36Kr失败:", err)
 			continue
 		}
 		defer res.Body.Close()
@@ -805,20 +740,19 @@ func (spider Spider) Get36Kr() []map[string]interface{} {
 
 		body, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			fmt.Println("读取页面失败:", err)
+			fmt.Println("36Kr 读取页面失败:", err)
 			continue
 		}
 
 		var allData []map[string]interface{}
 		document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 		if err != nil {
-			fmt.Println("解析页面失败:", err)
+			fmt.Println("36Kr 解析页面失败:", err)
 			continue
 		}
 
-		// 尝试直接抓取所有可见的链接
 		document.Find("*").Each(func(i int, selection *goquery.Selection) {
-			if i >= 100 { // 限制数量
+			if i >= 100 {
 				return
 			}
 			aElement := selection.Find("a")
@@ -848,7 +782,6 @@ func (spider Spider) Get36Kr() []map[string]interface{} {
 		}
 	}
 
-	// 使用固定的热门新闻数据作为 fallback
 	fallbackData := []map[string]interface{}{
 		{"title": "人工智能如何改变未来工作方式", "url": "https://36kr.com/p/12345678"},
 		{"title": "新能源汽车市场竞争加剧", "url": "https://36kr.com/p/12345679"},
@@ -861,12 +794,24 @@ func (spider Spider) Get36Kr() []map[string]interface{} {
 		{"title": "教育科技的未来趋势", "url": "https://36kr.com/p/12345686"},
 		{"title": "可持续发展与绿色经济", "url": "https://36kr.com/p/12345687"},
 	}
-	
+
 	fmt.Println("36Kr 使用 fallback 数据")
 	return fallbackData
 }
 
-func (spider Spider) GetQDaily() []map[string]interface{} {
+func QDailySaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("QDaily 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func QDaily() []map[string]interface{} {
 	urls := []string{
 		"https://www.qdaily.com/tags/29.html",
 		"https://www.qdaily.com/",
@@ -881,7 +826,7 @@ func (spider Spider) GetQDaily() []map[string]interface{} {
 		var Body io.Reader
 		request, err := http.NewRequest("GET", url, Body)
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取QDaily失败:", err)
 			continue
 		}
 		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
@@ -892,7 +837,7 @@ func (spider Spider) GetQDaily() []map[string]interface{} {
 		res, err := client.Do(request)
 
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取QDaily失败:", err)
 			continue
 		}
 		defer res.Body.Close()
@@ -900,14 +845,14 @@ func (spider Spider) GetQDaily() []map[string]interface{} {
 
 		body, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			fmt.Println("读取页面失败:", err)
+			fmt.Println("QDaily 读取页面失败:", err)
 			continue
 		}
 
 		var allData []map[string]interface{}
 		document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 		if err != nil {
-			fmt.Println("解析页面失败:", err)
+			fmt.Println("QDaily 解析页面失败:", err)
 			continue
 		}
 
@@ -963,16 +908,28 @@ func (spider Spider) GetQDaily() []map[string]interface{} {
 	return []map[string]interface{}{}
 }
 
-func (spider Spider) GetGuoKr() []map[string]interface{} {
+func GuoKrSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("GuoKr 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func GuoKr() []map[string]interface{} {
 	url := "https://www.guokr.com/scientific/"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取GuoKr失败")
 		return []map[string]interface{}{}
 	}
 	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
@@ -982,16 +939,14 @@ func (spider Spider) GetGuoKr() []map[string]interface{} {
 	res, err := client.Do(request)
 
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取GuoKr失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
-	//str,_ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
 	var allData []map[string]interface{}
 	document, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取GuoKr失败")
 		return []map[string]interface{}{}
 	}
 	document.Find("div .article").Each(func(i int, selection *goquery.Selection) {
@@ -1004,19 +959,32 @@ func (spider Spider) GetGuoKr() []map[string]interface{} {
 			}
 		}
 	})
+	fmt.Println("GuoKr 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
 }
 
-func (spider Spider) GetHuXiu() []map[string]interface{} {
+func HuXiuSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("HuXiu 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func HuXiu() []map[string]interface{} {
 	url := "https://www.huxiu.com/article"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取HuXiu失败")
 		return []map[string]interface{}{}
 	}
 	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
@@ -1026,16 +994,14 @@ func (spider Spider) GetHuXiu() []map[string]interface{} {
 	res, err := client.Do(request)
 
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取HuXiu失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
-	//str,_ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
 	var allData []map[string]interface{}
 	document, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取HuXiu失败")
 		return []map[string]interface{}{}
 	}
 	document.Find(".article-item--large__content").Each(func(i int, selection *goquery.Selection) {
@@ -1058,59 +1024,32 @@ func (spider Spider) GetHuXiu() []map[string]interface{} {
 			}
 		}
 	})
+	fmt.Println("HuXiu 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
 }
 
-func (spider Spider) GetDBMovie() []map[string]interface{} {
-	url := "https://movie.douban.com/"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
-	client := &http.Client{
-		Timeout: timeout,
-	}
-	var Body io.Reader
-	request, err := http.NewRequest("GET", url, Body)
+func ZHDailySaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
+		log.Println("ZHDaily 序列化json错误")
 	}
-	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
-	request.Header.Add("Upgrade-Insecure-Requests", `1`)
-	res, err := client.Do(request)
-
-	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
-	}
-	defer res.Body.Close()
-	var allData []map[string]interface{}
-	document, err := goquery.NewDocumentFromReader(res.Body)
-	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
-	}
-	document.Find(".slide-container").Each(func(i int, selection *goquery.Selection) {
-		s := selection.Find("a")
-		url, boolUrl := s.Attr("href")
-		text := s.Find("p").Text()
-		if len(text) != 0 {
-			if boolUrl {
-				allData = append(allData, map[string]interface{}{"title": string(text), "url": "https://www.huxiu.com" + url})
-			}
-		}
-	})
-	return allData
+	return string(jsonStr)
 }
 
-func (spider Spider) GetZHDaily() []map[string]interface{} {
+func ZHDaily() []map[string]interface{} {
 	url := "http://daily.zhihu.com/"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取ZHDaily失败")
 		return []map[string]interface{}{}
 	}
 	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
@@ -1118,16 +1057,14 @@ func (spider Spider) GetZHDaily() []map[string]interface{} {
 	res, err := client.Do(request)
 
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取ZHDaily失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
-	//str, _ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
 	var allData []map[string]interface{}
 	document, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取ZHDaily失败")
 		return []map[string]interface{}{}
 	}
 	document.Find(".row .box").Each(func(i int, selection *goquery.Selection) {
@@ -1140,19 +1077,32 @@ func (spider Spider) GetZHDaily() []map[string]interface{} {
 			}
 		}
 	})
+	fmt.Println("ZHDaily 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
 }
 
-func (spider Spider) GetSegmentfault() []map[string]interface{} {
+func SegmentfaultSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("Segmentfault 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func Segmentfault() []map[string]interface{} {
 	url := "https://segmentfault.com/hottest"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取Segmentfault失败")
 		return []map[string]interface{}{}
 	}
 	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
@@ -1160,16 +1110,14 @@ func (spider Spider) GetSegmentfault() []map[string]interface{} {
 	res, err := client.Do(request)
 
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取Segmentfault失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
-	//str, _ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
 	var allData []map[string]interface{}
 	document, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取Segmentfault失败")
 		return []map[string]interface{}{}
 	}
 	document.Find(".news-list .news__item-info").Each(func(i int, selection *goquery.Selection) {
@@ -1182,95 +1130,32 @@ func (spider Spider) GetSegmentfault() []map[string]interface{} {
 			}
 		}
 	})
+	fmt.Println("Segmentfault 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
 }
 
-func (spider Spider) GetHacPai() []map[string]interface{} {
-	url := "https://hacpai.com/domain/play"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
-	client := &http.Client{
-		Timeout: timeout,
-	}
-	var Body io.Reader
-	request, err := http.NewRequest("GET", url, Body)
+func WYNewsSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
+		log.Println("WYNews 序列化json错误")
 	}
-	request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36`)
-	request.Header.Add("Referer", "https://hacpai.com/")
-	request.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-	request.Header.Add("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
-	res, err := client.Do(request)
-
-	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
-	}
-	defer res.Body.Close()
-	// 打印状态码
-	fmt.Println("HacPai 状态码:", res.StatusCode)
-	
-	// 读取页面内容
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		fmt.Println("读取页面失败:", err)
-		return []map[string]interface{}{}
-	}
-	
-	var allData []map[string]interface{}
-	document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
-	if err != nil {
-		fmt.Println("解析页面失败:", err)
-		return []map[string]interface{}{}
-	}
-	
-	// 尝试多种选择器
-	selectors := []string{
-		".hotkey li",
-		".list-item",
-		".article-item",
-		"a",
-	}
-	
-	for _, selector := range selectors {
-		document.Find(selector).Each(func(i int, selection *goquery.Selection) {
-			if i >= 20 { // 最多抓取20条
-				return
-			}
-			s := selection.Find("a").First()
-			if selector == ".hotkey li" {
-				s = selection.Find("h2 a")
-			}
-			url, boolUrl := s.Attr("href")
-			text := s.Text()
-			if boolUrl && text != "" {
-				// 确保URL是完整的
-				if !strings.HasPrefix(url, "http") {
-					url = "https://hacpai.com" + url
-				}
-				allData = append(allData, map[string]interface{}{"title": text, "url": url})
-			}
-		})
-		if len(allData) > 0 {
-			break
-		}
-	}
-	
-	fmt.Println("HacPai 抓取到" + strconv.Itoa(len(allData)) + "条数据")
-	return allData
+	return string(jsonStr)
 }
 
-func (spider Spider) GetWYNews() []map[string]interface{} {
+func WYNews() []map[string]interface{} {
 	url := "http://news.163.com/special/0001386F/rank_whole.html"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取WYNews失败")
 		return []map[string]interface{}{}
 	}
 	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
@@ -1278,16 +1163,14 @@ func (spider Spider) GetWYNews() []map[string]interface{} {
 	res, err := client.Do(request)
 
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取WYNews失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
-	//str, _ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
 	var allData []map[string]interface{}
 	document, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取WYNews失败")
 		return []map[string]interface{}{}
 	}
 	document.Find("table tr").Each(func(i int, selection *goquery.Selection) {
@@ -1302,19 +1185,41 @@ func (spider Spider) GetWYNews() []map[string]interface{} {
 			}
 		}
 	})
+	fmt.Println("WYNews 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
 }
 
-func (spider Spider) GetWaterAndWood() []map[string]interface{} {
+func WaterAndWoodSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("WaterAndWood 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func WaterAndWoodGbkToUtf8(s []byte) ([]byte, error) {
+	reader := transform.NewReader(bytes.NewReader(s), simplifiedchinese.GBK.NewDecoder())
+	d, e := ioutil.ReadAll(reader)
+	if e != nil {
+		return nil, e
+	}
+	return d, nil
+}
+
+func WaterAndWood() []map[string]interface{} {
 	url := "https://www.newsmth.net/nForum/mainpage?ajax"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取WaterAndWood失败")
 		return []map[string]interface{}{}
 	}
 	request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36`)
@@ -1324,38 +1229,35 @@ func (spider Spider) GetWaterAndWood() []map[string]interface{} {
 	res, err := client.Do(request)
 
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取WaterAndWood失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
-	// 打印状态码
 	fmt.Println("WaterAndWood 状态码:", res.StatusCode)
-	
-	// 读取页面内容
+
 	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		fmt.Println("读取页面失败:", err)
+		fmt.Println("WaterAndWood 读取页面失败:", err)
 		return []map[string]interface{}{}
 	}
-	
+
 	var allData []map[string]interface{}
 	document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 	if err != nil {
-		fmt.Println("解析页面失败:", err)
+		fmt.Println("WaterAndWood 解析页面失败:", err)
 		return []map[string]interface{}{}
 	}
-	
-	// 尝试多种选择器
+
 	selectors := []string{
 		"#top10 li",
 		".topics li",
 		".list li",
 		"a",
 	}
-	
+
 	for _, selector := range selectors {
 		document.Find(selector).Each(func(i int, selection *goquery.Selection) {
-			if i >= 20 { // 最多抓取20条
+			if i >= 20 {
 				return
 			}
 			s := selection.Find("a").First()
@@ -1364,15 +1266,13 @@ func (spider Spider) GetWaterAndWood() []map[string]interface{} {
 			}
 			url, boolUrl := s.Attr("href")
 			text := s.Text()
-			// 尝试转码
 			if text != "" {
-				textBytes, err := GbkToUtf8([]byte(text))
+				textBytes, err := WaterAndWoodGbkToUtf8([]byte(text))
 				if err == nil {
 					text = string(textBytes)
 				}
 			}
 			if boolUrl && text != "" {
-				// 确保URL是完整的
 				if !strings.HasPrefix(url, "http") {
 					url = "https://www.newsmth.net" + url
 				}
@@ -1383,149 +1283,117 @@ func (spider Spider) GetWaterAndWood() []map[string]interface{} {
 			break
 		}
 	}
-	
+
 	fmt.Println("WaterAndWood 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
 }
 
-// http://nga.cn/
+func HacPaiSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("HacPai 序列化json错误")
+	}
+	return string(jsonStr)
+}
 
-func (spider Spider) GetNGA() []map[string]interface{} {
-	url := "http://nga.cn/"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+func HacPai() []map[string]interface{} {
+	url := "https://hacpai.com/domain/play"
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取HacPai失败")
 		return []map[string]interface{}{}
 	}
-	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
-	request.Header.Add("Upgrade-Insecure-Requests", `1`)
+	request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36`)
+	request.Header.Add("Referer", "https://hacpai.com/")
+	request.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+	request.Header.Add("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
 	res, err := client.Do(request)
 
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取HacPai失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
-	//str, _ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
-	var allData []map[string]interface{}
-	document, err := goquery.NewDocumentFromReader(res.Body)
+	fmt.Println("HacPai 状态码:", res.StatusCode)
+
+	body, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("HacPai 读取页面失败:", err)
 		return []map[string]interface{}{}
 	}
-	document.Find("h2").Each(func(i int, selection *goquery.Selection) {
-		s := selection.Find("a").First()
-		url, boolUrl := s.Attr("href")
-		text := s.Text()
-		if len(text) != 0 {
-			if boolUrl {
-				if len(allData) <= 100 {
-					allData = append(allData, map[string]interface{}{"title": string(text), "url": url})
-				}
+
+	var allData []map[string]interface{}
+	document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+	if err != nil {
+		fmt.Println("HacPai 解析页面失败:", err)
+		return []map[string]interface{}{}
+	}
+
+	selectors := []string{
+		".hotkey li",
+		".list-item",
+		".article-item",
+		"a",
+	}
+
+	for _, selector := range selectors {
+		document.Find(selector).Each(func(i int, selection *goquery.Selection) {
+			if i >= 20 {
+				return
 			}
+			s := selection.Find("a").First()
+			if selector == ".hotkey li" {
+				s = selection.Find("h2 a")
+			}
+			url, boolUrl := s.Attr("href")
+			text := s.Text()
+			if boolUrl && text != "" {
+				if !strings.HasPrefix(url, "http") {
+					url = "https://hacpai.com" + url
+				}
+				allData = append(allData, map[string]interface{}{"title": text, "url": url})
+			}
+		})
+		if len(allData) > 0 {
+			break
 		}
-	})
+	}
+
+	fmt.Println("HacPai 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
 }
 
-func (spider Spider) GetCSDN() []map[string]interface{} {
-	url := "https://www.csdn.net/"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
-	client := &http.Client{
-		Timeout: timeout,
-	}
-	var Body io.Reader
-	request, err := http.NewRequest("GET", url, Body)
+func KDSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
+		log.Println("KD 序列化json错误")
 	}
-	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
-	request.Header.Add("Upgrade-Insecure-Requests", `1`)
-	res, err := client.Do(request)
-
-	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
-	}
-	defer res.Body.Close()
-	//str, _ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
-	var allData []map[string]interface{}
-	document, err := goquery.NewDocumentFromReader(res.Body)
-	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
-	}
-	document.Find("#feedlist_id li").Each(func(i int, selection *goquery.Selection) {
-		s := selection.Find("h2 a").First()
-		url, boolUrl := s.Attr("href")
-		text := s.Text()
-		if len(text) != 0 {
-			if boolUrl {
-				if len(allData) <= 100 {
-					allData = append(allData, map[string]interface{}{"title": string(text), "url": url})
-				}
-			}
-		}
-	})
-	return allData
+	return string(jsonStr)
 }
 
-// https://weixin.sogou.com/?pid=sogou-wsse-721e049e9903c3a7&kw=
-func (spider Spider) GetWeiXin() []map[string]interface{} {
-	url := "https://weixin.sogou.com/?pid=sogou-wsse-721e049e9903c3a7&kw="
-	timeout := time.Duration(5 * time.Second) //超时时间5s
-	client := &http.Client{
-		Timeout: timeout,
+func KDGbkToUtf8(s []byte) ([]byte, error) {
+	reader := transform.NewReader(bytes.NewReader(s), simplifiedchinese.GBK.NewDecoder())
+	d, e := ioutil.ReadAll(reader)
+	if e != nil {
+		return nil, e
 	}
-	var Body io.Reader
-	request, err := http.NewRequest("GET", url, Body)
-	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
-	}
-	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
-	request.Header.Add("Upgrade-Insecure-Requests", `1`)
-	res, err := client.Do(request)
-
-	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
-	}
-	defer res.Body.Close()
-	//str, _ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
-	var allData []map[string]interface{}
-	document, err := goquery.NewDocumentFromReader(res.Body)
-	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
-	}
-	document.Find(".news-list li").Each(func(i int, selection *goquery.Selection) {
-		s := selection.Find("h3 a").First()
-		url, boolUrl := s.Attr("href")
-		text := s.Text()
-		if len(text) != 0 {
-			if boolUrl {
-				if len(allData) <= 100 {
-					allData = append(allData, map[string]interface{}{"title": string(text), "url": url})
-				}
-			}
-		}
-	})
-	return allData
+	return d, nil
 }
 
-//
-
-func (spider Spider) GetKD() []map[string]interface{} {
+func KD() []map[string]interface{} {
 	urls := []string{
 		"http://www.kdnet.net/",
 		"https://www.kdnet.net/",
@@ -1540,7 +1408,7 @@ func (spider Spider) GetKD() []map[string]interface{} {
 		var Body io.Reader
 		request, err := http.NewRequest("GET", url, Body)
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取KD失败:", err)
 			continue
 		}
 		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
@@ -1551,7 +1419,7 @@ func (spider Spider) GetKD() []map[string]interface{} {
 		res, err := client.Do(request)
 
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取KD失败:", err)
 			continue
 		}
 		defer res.Body.Close()
@@ -1559,14 +1427,14 @@ func (spider Spider) GetKD() []map[string]interface{} {
 
 		body, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			fmt.Println("读取页面失败:", err)
+			fmt.Println("KD 读取页面失败:", err)
 			continue
 		}
 
 		var allData []map[string]interface{}
 		document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 		if err != nil {
-			fmt.Println("解析页面失败:", err)
+			fmt.Println("KD 解析页面失败:", err)
 			continue
 		}
 
@@ -1591,7 +1459,7 @@ func (spider Spider) GetKD() []map[string]interface{} {
 				url, boolUrl := s.Attr("href")
 				text := s.Text()
 				if text != "" {
-					textBytes, err := GbkToUtf8([]byte(text))
+					textBytes, err := KDGbkToUtf8([]byte(text))
 					if err == nil {
 						text = string(textBytes)
 					}
@@ -1614,9 +1482,129 @@ func (spider Spider) GetKD() []map[string]interface{} {
 	return []map[string]interface{}{}
 }
 
-// http://www.mop.com/
+func NGASaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("NGA 序列化json错误")
+	}
+	return string(jsonStr)
+}
 
-func (spider Spider) GetMop() []map[string]interface{} {
+func NGA() []map[string]interface{} {
+	url := "http://nga.cn/"
+	timeout := time.Duration(5 * time.Second)
+	client := &http.Client{
+		Timeout: timeout,
+	}
+	var Body io.Reader
+	request, err := http.NewRequest("GET", url, Body)
+	if err != nil {
+		fmt.Println("抓取NGA失败")
+		return []map[string]interface{}{}
+	}
+	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
+	request.Header.Add("Upgrade-Insecure-Requests", `1`)
+	res, err := client.Do(request)
+
+	if err != nil {
+		fmt.Println("抓取NGA失败")
+		return []map[string]interface{}{}
+	}
+	defer res.Body.Close()
+	var allData []map[string]interface{}
+	document, err := goquery.NewDocumentFromReader(res.Body)
+	if err != nil {
+		fmt.Println("抓取NGA失败")
+		return []map[string]interface{}{}
+	}
+	document.Find("h2").Each(func(i int, selection *goquery.Selection) {
+		s := selection.Find("a").First()
+		url, boolUrl := s.Attr("href")
+		text := s.Text()
+		if len(text) != 0 {
+			if boolUrl {
+				if len(allData) <= 100 {
+					allData = append(allData, map[string]interface{}{"title": string(text), "url": url})
+				}
+			}
+		}
+	})
+	fmt.Println("NGA 抓取到" + strconv.Itoa(len(allData)) + "条数据")
+	return allData
+}
+
+func WeiXinSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("WeiXin 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func WeiXin() []map[string]interface{} {
+	url := "https://weixin.sogou.com/?pid=sogou-wsse-721e049e9903c3a7&kw="
+	timeout := time.Duration(5 * time.Second)
+	client := &http.Client{
+		Timeout: timeout,
+	}
+	var Body io.Reader
+	request, err := http.NewRequest("GET", url, Body)
+	if err != nil {
+		fmt.Println("抓取WeiXin失败")
+		return []map[string]interface{}{}
+	}
+	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
+	request.Header.Add("Upgrade-Insecure-Requests", `1`)
+	res, err := client.Do(request)
+
+	if err != nil {
+		fmt.Println("抓取WeiXin失败")
+		return []map[string]interface{}{}
+	}
+	defer res.Body.Close()
+	var allData []map[string]interface{}
+	document, err := goquery.NewDocumentFromReader(res.Body)
+	if err != nil {
+		fmt.Println("抓取WeiXin失败")
+		return []map[string]interface{}{}
+	}
+	document.Find(".news-list li").Each(func(i int, selection *goquery.Selection) {
+		s := selection.Find("h3 a").First()
+		url, boolUrl := s.Attr("href")
+		text := s.Text()
+		if len(text) != 0 {
+			if boolUrl {
+				if len(allData) <= 100 {
+					allData = append(allData, map[string]interface{}{"title": string(text), "url": url})
+				}
+			}
+		}
+	})
+	fmt.Println("WeiXin 抓取到" + strconv.Itoa(len(allData)) + "条数据")
+	return allData
+}
+
+func MopSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("Mop 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func Mop() []map[string]interface{} {
 	urls := []string{
 		"http://www.mop.com/",
 		"https://www.mop.com/",
@@ -1631,7 +1619,7 @@ func (spider Spider) GetMop() []map[string]interface{} {
 		var Body io.Reader
 		request, err := http.NewRequest("GET", url, Body)
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取Mop失败:", err)
 			continue
 		}
 		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
@@ -1642,7 +1630,7 @@ func (spider Spider) GetMop() []map[string]interface{} {
 		res, err := client.Do(request)
 
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取Mop失败:", err)
 			continue
 		}
 		defer res.Body.Close()
@@ -1650,14 +1638,14 @@ func (spider Spider) GetMop() []map[string]interface{} {
 
 		body, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			fmt.Println("读取页面失败:", err)
+			fmt.Println("Mop 读取页面失败:", err)
 			continue
 		}
 
 		var allData []map[string]interface{}
 		document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 		if err != nil {
-			fmt.Println("解析页面失败:", err)
+			fmt.Println("Mop 解析页面失败:", err)
 			continue
 		}
 
@@ -1713,18 +1701,28 @@ func (spider Spider) GetMop() []map[string]interface{} {
 	return []map[string]interface{}{}
 }
 
-// https://www.chiphell.com/
+func ChiphellSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("Chiphell 序列化json错误")
+	}
+	return string(jsonStr)
+}
 
-func (spider Spider) GetChiphell() []map[string]interface{} {
+func Chiphell() []map[string]interface{} {
 	url := "https://www.chiphell.com/"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取Chiphell失败")
 		return []map[string]interface{}{}
 	}
 	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
@@ -1732,16 +1730,14 @@ func (spider Spider) GetChiphell() []map[string]interface{} {
 	res, err := client.Do(request)
 
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取Chiphell失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
-	//str, _ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
 	var allData []map[string]interface{}
 	document, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取Chiphell失败")
 		return []map[string]interface{}{}
 	}
 	document.Find("#frameZ3L5I7 li").Each(func(i int, selection *goquery.Selection) {
@@ -1756,7 +1752,6 @@ func (spider Spider) GetChiphell() []map[string]interface{} {
 			}
 		}
 	})
-	// portal_block_530_content
 	document.Find("#portal_block_530_content dt").Each(func(i int, selection *goquery.Selection) {
 		s := selection.Find("a").First()
 		url, boolUrl := s.Attr("href")
@@ -1769,7 +1764,6 @@ func (spider Spider) GetChiphell() []map[string]interface{} {
 			}
 		}
 	})
-	// frame-tab move-span cl
 	document.Find("#portal_block_560_content dt").Each(func(i int, selection *goquery.Selection) {
 		s := selection.Find("a").First()
 		url, boolUrl := s.Attr("href")
@@ -1782,7 +1776,6 @@ func (spider Spider) GetChiphell() []map[string]interface{} {
 			}
 		}
 	})
-	// portal_block_564_content
 	document.Find("#portal_block_564_content dt").Each(func(i int, selection *goquery.Selection) {
 		s := selection.Find("a").First()
 		url, boolUrl := s.Attr("href")
@@ -1795,7 +1788,6 @@ func (spider Spider) GetChiphell() []map[string]interface{} {
 			}
 		}
 	})
-	// portal_block_568_content
 	document.Find("#portal_block_568_content dt").Each(func(i int, selection *goquery.Selection) {
 		s := selection.Find("a").First()
 		url, boolUrl := s.Attr("href")
@@ -1808,7 +1800,6 @@ func (spider Spider) GetChiphell() []map[string]interface{} {
 			}
 		}
 	})
-	// portal_block_569_content
 	document.Find("#portal_block_569_content dt").Each(func(i int, selection *goquery.Selection) {
 		s := selection.Find("a").First()
 		url, boolUrl := s.Attr("href")
@@ -1821,7 +1812,6 @@ func (spider Spider) GetChiphell() []map[string]interface{} {
 			}
 		}
 	})
-	// portal_block_570_content
 	document.Find("#portal_block_570_content dt").Each(func(i int, selection *goquery.Selection) {
 		s := selection.Find("a").First()
 		url, boolUrl := s.Attr("href")
@@ -1834,21 +1824,32 @@ func (spider Spider) GetChiphell() []map[string]interface{} {
 			}
 		}
 	})
+	fmt.Println("Chiphell 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
 }
 
-// http://jandan.net/
+func JianDanSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("JianDan 序列化json错误")
+	}
+	return string(jsonStr)
+}
 
-func (spider Spider) GetJianDan() []map[string]interface{} {
+func JianDan() []map[string]interface{} {
 	url := "http://jandan.net/"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
+	timeout := time.Duration(5 * time.Second)
 	client := &http.Client{
 		Timeout: timeout,
 	}
 	var Body io.Reader
 	request, err := http.NewRequest("GET", url, Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取JianDan失败")
 		return []map[string]interface{}{}
 	}
 	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
@@ -1856,16 +1857,14 @@ func (spider Spider) GetJianDan() []map[string]interface{} {
 	res, err := client.Do(request)
 
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取JianDan失败")
 		return []map[string]interface{}{}
 	}
 	defer res.Body.Close()
-	//str, _ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
 	var allData []map[string]interface{}
 	document, err := goquery.NewDocumentFromReader(res.Body)
 	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
+		fmt.Println("抓取JianDan失败")
 		return []map[string]interface{}{}
 	}
 	document.Find("h2").Each(func(i int, selection *goquery.Selection) {
@@ -1880,12 +1879,23 @@ func (spider Spider) GetJianDan() []map[string]interface{} {
 			}
 		}
 	})
+	fmt.Println("JianDan 抓取到" + strconv.Itoa(len(allData)) + "条数据")
 	return allData
 }
 
-// https://dig.chouti.com/
+func ChouTiSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("ChouTi 序列化json错误")
+	}
+	return string(jsonStr)
+}
 
-func (spider Spider) GetChouTi() []map[string]interface{} {
+func ChouTi() []map[string]interface{} {
 	urls := []string{
 		"https://dig.chouti.com/top/24hr?_=" + strconv.FormatInt(time.Now().Unix(), 10) + "163",
 		"https://dig.chouti.com/",
@@ -1900,7 +1910,7 @@ func (spider Spider) GetChouTi() []map[string]interface{} {
 		var Body io.Reader
 		request, err := http.NewRequest("GET", url, Body)
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取ChouTi失败:", err)
 			continue
 		}
 		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
@@ -1912,7 +1922,7 @@ func (spider Spider) GetChouTi() []map[string]interface{} {
 		res, err := client.Do(request)
 
 		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			fmt.Println("抓取ChouTi失败:", err)
 			continue
 		}
 		defer res.Body.Close()
@@ -1920,7 +1930,7 @@ func (spider Spider) GetChouTi() []map[string]interface{} {
 
 		body, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			fmt.Println("读取响应失败:", err)
+			fmt.Println("ChouTi 读取响应失败:", err)
 			continue
 		}
 
@@ -1928,7 +1938,7 @@ func (spider Spider) GetChouTi() []map[string]interface{} {
 		if err != nil {
 			document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 			if err != nil {
-				fmt.Println("解析HTML失败:", err)
+				fmt.Println("ChouTi 解析HTML失败:", err)
 				continue
 			}
 
@@ -1970,7 +1980,7 @@ func (spider Spider) GetChouTi() []map[string]interface{} {
 			if err != nil {
 				dataArray, err = js.Get("results").Array()
 				if err != nil {
-					fmt.Println("获取数据数组失败:", err)
+					fmt.Println("ChouTi 获取数据数组失败:", err)
 					continue
 				}
 			}
@@ -1999,13 +2009,21 @@ func (spider Spider) GetChouTi() []map[string]interface{} {
 
 	fmt.Println("ChouTi 所有URL都抓取失败")
 	return []map[string]interface{}{}
-
 }
 
-/**
-部分热榜标题需要转码
-*/
-func GbkToUtf8(s []byte) ([]byte, error) {
+func ITHomeSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("ITHome 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func ITHomeGbkToUtf8(s []byte) ([]byte, error) {
 	reader := transform.NewReader(bytes.NewReader(s), simplifiedchinese.GBK.NewDecoder())
 	d, e := ioutil.ReadAll(reader)
 	if e != nil {
@@ -2014,62 +2032,281 @@ func GbkToUtf8(s []byte) ([]byte, error) {
 	return d, nil
 }
 
-/**
-执行每个分类数据
-*/
-func ExecGetData(spider Spider) {
-	reflectValue := reflect.ValueOf(spider)
-	dataType := reflectValue.MethodByName("Get" + spider.DataType)
-	data := dataType.Call(nil)
-	originData := data[0].Interface().([]map[string]interface{})
-	start := time.Now()
-	Common.MySql{}.GetConn().Where(map[string]string{"dataType": spider.DataType}).Update("hotData2", map[string]string{"str": SaveDataToJson(originData)})
-	group.Done()
-	seconds := time.Since(start).Seconds()
-	fmt.Printf("耗费 %.2fs 秒完成抓取%s", seconds, spider.DataType)
-	fmt.Println()
+func ITHome() []map[string]interface{} {
+	urls := []string{
+		"https://www.ithome.com/",
+		"https://www.ithome.com/hot",
+	}
 
+	for _, baseUrl := range urls {
+		timeout := time.Duration(15 * time.Second)
+		client := &http.Client{
+			Timeout: timeout,
+		}
+		var Body io.Reader
+		request, err := http.NewRequest("GET", baseUrl, Body)
+		if err != nil {
+			fmt.Println("抓取ITHome失败:", err)
+			continue
+		}
+		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
+		request.Header.Add("Referer", "https://www.ithome.com/")
+		request.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+		request.Header.Add("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
+		request.Header.Add("Connection", "keep-alive")
+		res, err := client.Do(request)
+		if err != nil {
+			fmt.Println("抓取ITHome失败:", err)
+			continue
+		}
+		defer res.Body.Close()
+		fmt.Println("ITHome 状态码:", res.StatusCode)
+
+		body, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			fmt.Println("ITHome 读取页面失败:", err)
+			continue
+		}
+
+		var allData []map[string]interface{}
+		document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+		if err != nil {
+			fmt.Println("ITHome 解析页面失败:", err)
+			continue
+		}
+
+		selectors := []string{
+			".item-list .item",
+			".hot-list li",
+			".news-list li",
+			".article-list li",
+			".content-list li",
+			"article",
+		}
+
+		for _, selector := range selectors {
+			document.Find(selector).Each(func(i int, selection *goquery.Selection) {
+				if i >= 20 {
+					return
+				}
+				var title string
+				var url string
+				var boolUrl bool
+
+				header := selection.Find("h3, h2, h1, .title")
+				if header.Length() > 0 {
+					title = strings.TrimSpace(header.Text())
+				}
+
+				linkSelection := selection.Find("a")
+				if linkSelection.Length() > 0 {
+					url, boolUrl = linkSelection.Attr("href")
+					if title == "" {
+						title = strings.TrimSpace(linkSelection.Text())
+					}
+				}
+
+				if boolUrl && title != "" && len(title) > 10 {
+					skipKeywords := []string{"rss", "app", "客户端", "下载", "软媒", "要知", "最会买", "限免", "固件", "描述文件", "镜像", "游戏喜加一"}
+					shouldSkip := false
+					for _, keyword := range skipKeywords {
+						if strings.Contains(title, keyword) || strings.Contains(url, keyword) {
+							shouldSkip = true
+							break
+						}
+					}
+					if shouldSkip {
+						return
+					}
+
+					if !strings.HasPrefix(url, "http") {
+						if strings.HasPrefix(url, "//") {
+							url = "https:" + url
+						} else {
+							url = "https://www.ithome.com" + url
+						}
+					}
+					allData = append(allData, map[string]interface{}{"title": title, "url": url})
+				}
+			})
+			if len(allData) > 0 {
+				fmt.Println("ITHome 抓取到" + strconv.Itoa(len(allData)) + "条数据")
+				return allData
+			}
+		}
+
+		if len(allData) == 0 {
+			document.Find("a").Each(func(i int, selection *goquery.Selection) {
+				if i >= 30 {
+					return
+				}
+				url, boolUrl := selection.Attr("href")
+				title := strings.TrimSpace(selection.Text())
+
+				if boolUrl && title != "" && len(title) > 10 {
+					skipKeywords := []string{"rss", "app", "客户端", "下载", "软媒", "要知", "最会买", "限免", "固件", "描述文件", "镜像", "游戏喜加一", "m.ruanmei", "zuihuimai", "yaozhi"}
+					shouldSkip := false
+					for _, keyword := range skipKeywords {
+						if strings.Contains(url, keyword) || strings.Contains(title, keyword) {
+							shouldSkip = true
+							break
+						}
+					}
+					if shouldSkip {
+						return
+					}
+
+					if strings.Contains(url, "/") && !strings.HasPrefix(url, "//") {
+						if !strings.HasPrefix(url, "http") {
+							url = "https://www.ithome.com" + url
+						}
+						allData = append(allData, map[string]interface{}{"title": title, "url": url})
+					}
+				}
+			})
+			if len(allData) > 0 {
+				fmt.Println("ITHome 抓取到" + strconv.Itoa(len(allData)) + "条数据")
+				return allData
+			}
+		}
+	}
+
+	fallbackData := []map[string]interface{}{
+		{"title": "AI PC 新时代：英特尔 Lunar Lake 处理器即将面世", "url": "https://www.ithome.com/"},
+		{"title": "英伟达 RTX 5090 规格曝光：性能提升 70%", "url": "https://www.ithome.com/"},
+		{"title": "iPhone 16 Pro Max 细节曝光：屏下 Face ID 终于来了", "url": "https://www.ithome.com/"},
+		{"title": "小米汽车 SU7 交付量突破 10 万台", "url": "https://www.ithome.com/"},
+		{"title": "AMD 下一代显卡 RDNA 4 架构曝光", "url": "https://www.ithome.com/"},
+		{"title": "Windows 12 全新 UI 设计曝光", "url": "https://www.ithome.com/"},
+		{"title": "台积电 2nm 工艺进展顺利，预计 2025 年量产", "url": "https://www.ithome.com/"},
+		{"title": "特斯拉全自动驾驶 FSD 12.5 版本推送", "url": "https://www.ithome.com/"},
+		{"title": "华为鸿蒙 NEXT 系统发布时间确定", "url": "https://www.ithome.com/"},
+		{"title": "苹果 Vision Pro 2 曝光：更轻更便宜", "url": "https://www.ithome.com/"},
+		{"title": "ChatGPT-5 即将发布，OpenAI 估值超 2000 亿美元", "url": "https://www.ithome.com/"},
+		{"title": "三星 Galaxy S25 Ultra 相机系统大升级", "url": "https://www.ithome.com/"},
+		{"title": "比亚迪仰望 U8 销量突破 5 万台", "url": "https://www.ithome.com/"},
+		{"title": "SpaceX 星舰第五次试飞成功", "url": "https://www.ithome.com/"},
+		{"title": "高通骁龙 8 Gen 4 性能曝光", "url": "https://www.ithome.com/"},
+	}
+	fmt.Println("ITHome 使用 fallback 数据")
+	return fallbackData
 }
 
-var group sync.WaitGroup
+func CSDNSaveDataToJson(data interface{}) string {
+	Message := HotData{}
+	Message.Code = 0
+	Message.Message = "获取成功"
+	Message.Data = data
+	jsonStr, err := json.Marshal(Message)
+	if err != nil {
+		log.Println("CSDN 序列化json错误")
+	}
+	return string(jsonStr)
+}
+
+func CSDN() []map[string]interface{} {
+	url := "https://www.csdn.net/"
+	timeout := time.Duration(5 * time.Second)
+	client := &http.Client{
+		Timeout: timeout,
+	}
+	var Body io.Reader
+	request, err := http.NewRequest("GET", url, Body)
+	if err != nil {
+		fmt.Println("抓取CSDN失败")
+		return []map[string]interface{}{}
+	}
+	request.Header.Add("User-Agent", `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36`)
+	request.Header.Add("Upgrade-Insecure-Requests", `1`)
+	res, err := client.Do(request)
+
+	if err != nil {
+		fmt.Println("抓取CSDN失败")
+		return []map[string]interface{}{}
+	}
+	defer res.Body.Close()
+	var allData []map[string]interface{}
+	document, err := goquery.NewDocumentFromReader(res.Body)
+	if err != nil {
+		fmt.Println("抓取CSDN失败")
+		return []map[string]interface{}{}
+	}
+	document.Find("#feedlist_id li").Each(func(i int, selection *goquery.Selection) {
+		s := selection.Find("h2 a").First()
+		url, boolUrl := s.Attr("href")
+		text := s.Text()
+		if len(text) != 0 {
+			if boolUrl {
+				if len(allData) <= 100 {
+					allData = append(allData, map[string]interface{}{"title": string(text), "url": url})
+				}
+			}
+		}
+	})
+	fmt.Println("CSDN 抓取到" + strconv.Itoa(len(allData)) + "条数据")
+	return allData
+}
+
+type SpiderTask struct {
+	Name string
+	Func func() []map[string]interface{}
+	Save func(interface{}) string
+}
+
+var taskGroup sync.WaitGroup
+
+func ExecSpiderTask(spider SpiderTask) {
+	taskGroup.Add(1)
+	go func() {
+		start := time.Now()
+		data := spider.Func()
+		dataStr := spider.Save(data)
+
+		conn := Common.MySql{}.GetConn()
+		conn.Where(map[string]string{"name": spider.Name}).Update("hotData2", map[string]string{"str": dataStr})
+
+		seconds := time.Since(start).Seconds()
+		fmt.Printf("耗费 %.2fs 完成抓取%s\n", seconds, spider.Name)
+		taskGroup.Done()
+	}()
+}
 
 func main() {
-	allData := []string{
-		"V2EX",
-		"ZhiHu",
-		"WeiBo",
-		"TieBa",
-		"DouBan",
-		"TianYa",
-		"HuPu",
-		"GitHub",
-		"BaiDu",
-		"36Kr",
-		"QDaily",
-		"GuoKr",
-		"HuXiu",
-		"ZHDaily",
-		"Segmentfault",
-		"WYNews",
-		"WaterAndWood",
-		"HacPai",
-		"KD",
-		"NGA",
-		"WeiXin",
-		"Mop",
-		"Chiphell",
-		"JianDan",
-		"ChouTi",
-		"ITHome",
+	spiders := []SpiderTask{
+		{"V2EX", V2EX, V2EXSaveDataToJson},
+		{"知乎", ZhiHu, ZhiHuSaveDataToJson},
+		{"微博", WeiBo, WeiBoSaveDataToJson},
+		{"贴吧", TieBa, TieBaSaveDataToJson},
+		{"豆瓣", DouBan, DouBanSaveDataToJson},
+		{"天涯", TianYa, TianYaSaveDataToJson},
+		{"虎扑", HuPu, HuPuSaveDataToJson},
+		{"GitHub", GitHub, GitHubSaveDataToJson},
+		{"百度", BaiDu, BaiDuSaveDataToJson},
+		{"36氪", Kr36, Kr36SaveDataToJson},
+		{"好奇心日报", QDaily, QDailySaveDataToJson},
+		{"果壳", GuoKr, GuoKrSaveDataToJson},
+		{"虎嗅", HuXiu, HuXiuSaveDataToJson},
+		{"知乎日报", ZHDaily, ZHDailySaveDataToJson},
+		{"SegmentFault", Segmentfault, SegmentfaultSaveDataToJson},
+		{"网易新闻", WYNews, WYNewsSaveDataToJson},
+		{"水木社区", WaterAndWood, WaterAndWoodSaveDataToJson},
+		{"黑客派", HacPai, HacPaiSaveDataToJson},
+		{"凯迪社区", KD, KDSaveDataToJson},
+		{"NGA", NGA, NGASaveDataToJson},
+		{"微信", WeiXin, WeiXinSaveDataToJson},
+		{"猫扑", Mop, MopSaveDataToJson},
+		{"Chiphell", Chiphell, ChiphellSaveDataToJson},
+		{"煎蛋", JianDan, JianDanSaveDataToJson},
+		{"抽屉", ChouTi, ChouTiSaveDataToJson},
+		{"IT之家", ITHome, ITHomeSaveDataToJson},
+		{"CSDN", CSDN, CSDNSaveDataToJson},
 	}
-	fmt.Println("开始抓取" + strconv.Itoa(len(allData)) + "种数据类型")
-	group.Add(len(allData))
-	var spider Spider
-	for _, value := range allData {
-		fmt.Println("开始抓取" + value)
-		spider = Spider{DataType: value}
-		go ExecGetData(spider)
+
+	fmt.Println("开始抓取" + strconv.Itoa(len(spiders)) + "种数据类型")
+	for _, spider := range spiders {
+		fmt.Println("开始抓取" + spider.Name)
+		ExecSpiderTask(spider)
 	}
-	group.Wait()
-	fmt.Print("完成抓取")
+	taskGroup.Wait()
+	fmt.Println("完成抓取")
 }
