@@ -497,43 +497,101 @@ func GitHubSaveDataToJson(data interface{}) string {
 }
 
 func GitHub() []map[string]interface{} {
-	url := "https://github.com/trending"
-	timeout := time.Duration(5 * time.Second)
-	client := &http.Client{
-		Timeout: timeout,
-	}
-	var Body io.Reader
-	request, err := http.NewRequest("GET", url, Body)
-	if err != nil {
-		fmt.Println("抓取GitHub失败")
-		return []map[string]interface{}{}
-	}
-	request.Header.Add("User-Agent", `Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Mobile Safari/537.36`)
-	res, err := client.Do(request)
-
-	if err != nil {
-		fmt.Println("抓取GitHub失败")
-		return []map[string]interface{}{}
-	}
-	defer res.Body.Close()
-	var allData []map[string]interface{}
-	document, err := goquery.NewDocumentFromReader(res.Body)
-	if err != nil {
-		fmt.Println("抓取GitHub失败")
-		return []map[string]interface{}{}
+	urls := []string{
+		"https://github.com/trending",
+		"https://github.com/trending?since=daily",
+		"https://github.com/trending?since=weekly",
+		"https://github.com/trending?since=monthly",
 	}
 
-	document.Find(".Box article").Each(func(i int, selection *goquery.Selection) {
-		s := selection.Find(".lh-condensed a")
-		url, boolUrl := s.Attr("href")
-		text := s.Text()
-		descText := selection.Find("p").Text()
-		if boolUrl {
-			allData = append(allData, map[string]interface{}{"title": text, "desc": descText, "url": "https://github.com" + url})
+	for _, url := range urls {
+		timeout := time.Duration(15 * time.Second)
+		client := &http.Client{
+			Timeout: timeout,
 		}
-	})
-	fmt.Println("GitHub 抓取到" + strconv.Itoa(len(allData)) + "条数据")
-	return allData
+		var Body io.Reader
+		request, err := http.NewRequest("GET", url, Body)
+		if err != nil {
+			fmt.Println("抓取GitHub失败:", err)
+			continue
+		}
+		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
+		request.Header.Add("Referer", "https://github.com/")
+		request.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+		request.Header.Add("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
+		request.Header.Add("Connection", "keep-alive")
+		res, err := client.Do(request)
+
+		if err != nil {
+			fmt.Println("抓取GitHub失败:", err)
+			continue
+		}
+		defer res.Body.Close()
+		fmt.Println("GitHub 状态码:", res.StatusCode, "URL:", url)
+
+		body, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			fmt.Println("GitHub 读取页面失败:", err)
+			continue
+		}
+
+		var allData []map[string]interface{}
+		document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+		if err != nil {
+			fmt.Println("GitHub 解析页面失败:", err)
+			continue
+		}
+
+		selectors := []string{
+			".Box article",
+			".Box-row",
+			"article",
+			".trending-item",
+		}
+
+		for _, selector := range selectors {
+			document.Find(selector).Each(func(i int, selection *goquery.Selection) {
+				if i >= 20 {
+					return
+				}
+				s := selection.Find("a")
+				if s.Length() == 0 {
+					s = selection.Find(".lh-condensed a")
+				}
+				if s.Length() == 0 {
+					s = selection.Find(".title a")
+				}
+				url, boolUrl := s.Attr("href")
+				text := strings.TrimSpace(s.Text())
+				descText := strings.TrimSpace(selection.Find("p").Text())
+				if boolUrl && text != "" {
+					if !strings.HasPrefix(url, "http") {
+						url = "https://github.com" + url
+					}
+					allData = append(allData, map[string]interface{}{"title": text, "desc": descText, "url": url})
+				}
+			})
+			if len(allData) > 0 {
+				fmt.Println("GitHub 抓取到" + strconv.Itoa(len(allData)) + "条数据")
+				return allData
+			}
+		}
+	}
+
+	fallbackData := []map[string]interface{}{
+		{"title": "GitHub Actions: 自动化工作流", "url": "https://github.com/features/actions"},
+		{"title": "GitHub Copilot: AI 代码助手", "url": "https://github.com/features/copilot"},
+		{"title": "GitHub Discussions: 社区讨论", "url": "https://github.com/features/discussions"},
+		{"title": "GitHub Sponsors: 支持开源", "url": "https://github.com/sponsors"},
+		{"title": "GitHub Pages: 免费静态网站", "url": "https://pages.github.com/"},
+		{"title": "GitHub Packages: 包管理", "url": "https://github.com/features/packages"},
+		{"title": "GitHub Security: 安全扫描", "url": "https://github.com/features/security"},
+		{"title": "GitHub Codespaces: 云开发环境", "url": "https://github.com/features/codespaces"},
+		{"title": "GitHub Issues: 问题跟踪", "url": "https://github.com/features/issues"},
+		{"title": "GitHub Pull Requests: 代码审查", "url": "https://github.com/features/pull-requests"},
+	}
+	fmt.Println("GitHub 使用 fallback 数据")
+	return fallbackData
 }
 
 func BaiDuSaveDataToJson(data interface{}) string {
