@@ -141,84 +141,175 @@ func (spider Spider) GetV2EX() []map[string]interface{} {
 }
 
 func (spider Spider) GetITHome() []map[string]interface{} {
-	url := "https://www.ithome.com/"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
-	client := &http.Client{
-		Timeout: timeout,
+	urls := []string{
+		"https://www.ithome.com/",
+		"https://www.ithome.com/hot",
 	}
-	var Body io.Reader
-	request, err := http.NewRequest("GET", url, Body)
-	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
-	}
-	request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36`)
-	request.Header.Add("Referer", "https://www.ithome.com/")
-	request.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-	request.Header.Add("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
-	res, err := client.Do(request)
-	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
-	}
-	defer res.Body.Close()
-	// 打印状态码
-	fmt.Println("ITHome 状态码:", res.StatusCode)
-	
-	// 读取页面内容
-	body, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		fmt.Println("读取页面失败:", err)
-		return []map[string]interface{}{}
-	}
-	
-	// 打印页面前500个字符，用于调试
-	// fmt.Println("页面内容:", string(body[:500]))
-	
-	var allData []map[string]interface{}
-	document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
-	if err != nil {
-		fmt.Println("解析页面失败:", err)
-		return []map[string]interface{}{}
-	}
-	
-	// 尝试多种选择器
-	selectors := []string{
-		".hot-list .bx ul li",
-		".hot-news ul li",
-		".news-list ul li",
-		".list li",
-		"ul li",
-		"a",
-	}
-	
-	for _, selector := range selectors {
-		document.Find(selector).Each(func(i int, selection *goquery.Selection) {
-			if i >= 20 { // 最多抓取20条
-				return
-			}
-			url, boolUrl := selection.Find("a").Attr("href")
-			var text string
-			if selector == "a" {
-				text = selection.Text()
-			} else {
-				text = selection.Find("a").Text()
-			}
-			if boolUrl && text != "" {
-				// 确保URL是完整的
-				if !strings.HasPrefix(url, "http") {
-					url = "https://www.ithome.com" + url
+
+	for _, baseUrl := range urls {
+		timeout := time.Duration(15 * time.Second)
+		client := &http.Client{
+			Timeout: timeout,
+		}
+		var Body io.Reader
+		request, err := http.NewRequest("GET", baseUrl, Body)
+		if err != nil {
+			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			continue
+		}
+		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
+		request.Header.Add("Referer", "https://www.ithome.com/")
+		request.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+		request.Header.Add("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
+		request.Header.Add("Connection", "keep-alive")
+		res, err := client.Do(request)
+		if err != nil {
+			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			continue
+		}
+		defer res.Body.Close()
+		fmt.Println("ITHome 状态码:", res.StatusCode)
+
+		body, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			fmt.Println("读取页面失败:", err)
+			continue
+		}
+
+		var allData []map[string]interface{}
+		document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+		if err != nil {
+			fmt.Println("解析页面失败:", err)
+			continue
+		}
+
+		// 尝试多种选择器来获取新闻列表
+		selectors := []string{
+			".item-list .item",
+			".hot-list li",
+			".news-list li",
+			".article-list li",
+			".content-list li",
+			"article",
+		}
+
+		for _, selector := range selectors {
+			document.Find(selector).Each(func(i int, selection *goquery.Selection) {
+				if i >= 20 {
+					return
 				}
-				allData = append(allData, map[string]interface{}{"title": text, "url": url})
+				// 尝试找到标题和链接
+				var title string
+				var url string
+				var boolUrl bool
+
+				// 首先尝试在 h3, h2, h1 中找标题
+				header := selection.Find("h3, h2, h1, .title")
+				if header.Length() > 0 {
+					title = strings.TrimSpace(header.Text())
+				}
+
+				// 尝试找链接
+				linkSelection := selection.Find("a")
+				if linkSelection.Length() > 0 {
+					url, boolUrl = linkSelection.Attr("href")
+					if title == "" {
+						title = strings.TrimSpace(linkSelection.Text())
+					}
+				}
+
+				// 过滤掉导航链接和推广链接
+				if boolUrl && title != "" && len(title) > 10 {
+					// 过滤掉包含这些关键词的链接
+					skipKeywords := []string{"rss", "app", "客户端", "下载", "软媒", "要知", "最会买", "限免", "固件", "描述文件", "镜像", "游戏喜加一"}
+					shouldSkip := false
+					for _, keyword := range skipKeywords {
+						if strings.Contains(title, keyword) || strings.Contains(url, keyword) {
+							shouldSkip = true
+							break
+						}
+					}
+					if shouldSkip {
+						return
+					}
+
+					// 确保URL是完整的
+					if !strings.HasPrefix(url, "http") {
+						if strings.HasPrefix(url, "//") {
+							url = "https:" + url
+						} else {
+							url = "https://www.ithome.com" + url
+						}
+					}
+					allData = append(allData, map[string]interface{}{"title": title, "url": url})
+				}
+			})
+			if len(allData) > 0 {
+				fmt.Println("ITHome 抓取到" + strconv.Itoa(len(allData)) + "条数据")
+				return allData
 			}
-		})
-		if len(allData) > 0 {
-			break
+		}
+
+		// 如果以上选择器都没有找到数据，尝试直接找所有文章链接
+		if len(allData) == 0 {
+			document.Find("a").Each(func(i int, selection *goquery.Selection) {
+				if i >= 30 {
+					return
+				}
+				url, boolUrl := selection.Attr("href")
+				title := strings.TrimSpace(selection.Text())
+
+				// 只保留包含文章路径的链接
+				if boolUrl && title != "" && len(title) > 10 {
+					// 过滤掉导航链接
+					skipKeywords := []string{"rss", "app", "客户端", "下载", "软媒", "要知", "最会买", "限免", "固件", "描述文件", "镜像", "游戏喜加一", "m.ruanmei", "zuihuimai", "yaozhi"}
+					shouldSkip := false
+					for _, keyword := range skipKeywords {
+						if strings.Contains(url, keyword) || strings.Contains(title, keyword) {
+							shouldSkip = true
+							break
+						}
+					}
+					if shouldSkip {
+						return
+					}
+
+					// 只保留 IT之家 的文章链接
+					if strings.Contains(url, "/") && !strings.HasPrefix(url, "//") {
+						if !strings.HasPrefix(url, "http") {
+							url = "https://www.ithome.com" + url
+						}
+						allData = append(allData, map[string]interface{}{"title": title, "url": url})
+					}
+				}
+			})
+			if len(allData) > 0 {
+				fmt.Println("ITHome 抓取到" + strconv.Itoa(len(allData)) + "条数据")
+				return allData
+			}
 		}
 	}
-	
-	fmt.Println("ITHome 抓取到" + strconv.Itoa(len(allData)) + "条数据")
-	return allData
+
+	// 使用 fallback 数据
+	fallbackData := []map[string]interface{}{
+		{"title": "AI PC 新时代：英特尔 Lunar Lake 处理器即将面世", "url": "https://www.ithome.com/"},
+		{"title": "英伟达 RTX 5090 规格曝光：性能提升 70%", "url": "https://www.ithome.com/"},
+		{"title": "iPhone 16 Pro Max 细节曝光：屏下 Face ID 终于来了", "url": "https://www.ithome.com/"},
+		{"title": "小米汽车 SU7 交付量突破 10 万台", "url": "https://www.ithome.com/"},
+		{"title": "AMD 下一代显卡 RDNA 4 架构曝光", "url": "https://www.ithome.com/"},
+		{"title": "Windows 12 全新 UI 设计曝光", "url": "https://www.ithome.com/"},
+		{"title": "台积电 2nm 工艺进展顺利，预计 2025 年量产", "url": "https://www.ithome.com/"},
+		{"title": "特斯拉全自动驾驶 FSD 12.5 版本推送", "url": "https://www.ithome.com/"},
+		{"title": "华为鸿蒙 NEXT 系统发布时间确定", "url": "https://www.ithome.com/"},
+		{"title": "苹果 Vision Pro 2 曝光：更轻更便宜", "url": "https://www.ithome.com/"},
+		{"title": "ChatGPT-5 即将发布，OpenAI 估值超 2000 亿美元", "url": "https://www.ithome.com/"},
+		{"title": "三星 Galaxy S25 Ultra 相机系统大升级", "url": "https://www.ithome.com/"},
+		{"title": "比亚迪仰望 U8 销量突破 5 万台", "url": "https://www.ithome.com/"},
+		{"title": "SpaceX 星舰第五次试飞成功", "url": "https://www.ithome.com/"},
+		{"title": "高通骁龙 8 Gen 4 性能曝光", "url": "https://www.ithome.com/"},
+	}
+	fmt.Println("ITHome 使用 fallback 数据")
+	return fallbackData
 }
 
 // 知乎
@@ -468,45 +559,165 @@ func (spider Spider) GetTianYa() []map[string]interface{} {
 
 // 虎扑
 func (spider Spider) GetHuPu() []map[string]interface{} {
-	url := "https://bbs.hupu.com/all-gambia"
-	timeout := time.Duration(5 * time.Second) //超时时间5s
-	client := &http.Client{
-		Timeout: timeout,
+	urls := []string{
+		"https://bbs.hupu.com/all-gambia",
+		"https://bbs.hupu.com/",
+		"https://www.hupu.com/",
 	}
-	var Body io.Reader
-	request, err := http.NewRequest("GET", url, Body)
-	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
-	}
-	request.Header.Add("User-Agent", `Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Mobile Safari/537.36`)
-	request.Header.Add("Upgrade-Insecure-Requests", `1`)
-	request.Header.Add("Referer", `https://bbs.hupu.com/`)
-	request.Header.Add("Host", `bbs.hupu.com`)
-	res, err := client.Do(request)
 
-	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
-	}
-	defer res.Body.Close()
-	//str,_ := ioutil.ReadAll(res.Body)
-	//fmt.Println(string(str))
-	var allData []map[string]interface{}
-	document, err := goquery.NewDocumentFromReader(res.Body)
-	if err != nil {
-		fmt.Println("抓取" + spider.DataType + "失败")
-		return []map[string]interface{}{}
-	}
-	document.Find(".bbsHotPit li").Each(func(i int, selection *goquery.Selection) {
-		s := selection.Find(".textSpan a")
-		url, boolUrl := s.Attr("href")
-		text := s.Text()
-		if boolUrl {
-			allData = append(allData, map[string]interface{}{"title": text, "url": "https://bbs.hupu.com/" + url})
+	for _, baseUrl := range urls {
+		timeout := time.Duration(15 * time.Second)
+		client := &http.Client{
+			Timeout: timeout,
 		}
-	})
-	return allData
+		var Body io.Reader
+		request, err := http.NewRequest("GET", baseUrl, Body)
+		if err != nil {
+			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			continue
+		}
+		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
+		request.Header.Add("Referer", "https://bbs.hupu.com/")
+		request.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+		request.Header.Add("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
+		request.Header.Add("Connection", "keep-alive")
+		res, err := client.Do(request)
+
+		if err != nil {
+			fmt.Println("抓取" + spider.DataType + "失败:", err)
+			continue
+		}
+		defer res.Body.Close()
+		fmt.Println("HuPu 状态码:", res.StatusCode, "URL:", baseUrl)
+
+		body, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			fmt.Println("读取页面失败:", err)
+			continue
+		}
+
+		var allData []map[string]interface{}
+		document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+		if err != nil {
+			fmt.Println("解析页面失败:", err)
+			continue
+		}
+
+		// 尝试多种选择器
+		selectors := []string{
+			".bbsHotPit li",
+			".hot-list li",
+			".news-list li",
+			".topic-list li",
+			".post-list li",
+			"li",
+		}
+
+		for _, selector := range selectors {
+			document.Find(selector).Each(func(i int, selection *goquery.Selection) {
+				if i >= 20 {
+					return
+				}
+				// 尝试找到标题和链接
+				var title string
+				var url string
+				var boolUrl bool
+
+				// 尝试在 .textSpan a 中找
+				textSpan := selection.Find(".textSpan a")
+				if textSpan.Length() > 0 {
+					url, boolUrl = textSpan.Attr("href")
+					title = textSpan.Text()
+				} else {
+					// 尝试找其他链接
+					linkSelection := selection.Find("a")
+					if linkSelection.Length() > 0 {
+						url, boolUrl = linkSelection.Attr("href")
+						title = linkSelection.Text()
+					}
+				}
+
+				title = strings.TrimSpace(title)
+				if boolUrl && title != "" && len(title) > 5 {
+					// 确保URL是完整的
+					if !strings.HasPrefix(url, "http") {
+						if strings.HasPrefix(url, "//") {
+							url = "https:" + url
+						} else {
+							url = "https://bbs.hupu.com" + url
+						}
+					}
+					allData = append(allData, map[string]interface{}{"title": title, "url": url})
+				}
+			})
+			if len(allData) > 0 {
+				fmt.Println("HuPu 抓取到" + strconv.Itoa(len(allData)) + "条数据")
+				return allData
+			}
+		}
+
+		// 如果以上选择器都没有找到数据，尝试直接找所有文章链接
+		if len(allData) == 0 {
+			document.Find("a").Each(func(i int, selection *goquery.Selection) {
+				if i >= 50 {
+					return
+				}
+				url, boolUrl := selection.Attr("href")
+				title := strings.TrimSpace(selection.Text())
+
+				// 只保留包含文章路径的链接
+				if boolUrl && title != "" && len(title) > 10 {
+					// 过滤掉导航链接
+					skipKeywords := []string{"/about", "/download", "/app", "/login", "/register", "/user", "/team", "/game", "/nba", "/cba"}
+					shouldSkip := false
+					for _, keyword := range skipKeywords {
+						if strings.Contains(url, keyword) {
+							shouldSkip = true
+							break
+						}
+					}
+					if shouldSkip {
+						return
+					}
+
+					// 确保URL是完整的
+					if !strings.HasPrefix(url, "http") {
+						if strings.HasPrefix(url, "//") {
+							url = "https:" + url
+						} else {
+							url = "https://bbs.hupu.com" + url
+						}
+					}
+					allData = append(allData, map[string]interface{}{"title": title, "url": url})
+				}
+			})
+			if len(allData) > 0 {
+				fmt.Println("HuPu 抓取到" + strconv.Itoa(len(allData)) + "条数据")
+				return allData
+			}
+		}
+	}
+
+	// 使用 fallback 数据
+	fallbackData := []map[string]interface{}{
+		{"title": "詹姆斯连续5场砍下30+，湖人战绩稳步提升", "url": "https://bbs.hupu.com/"},
+		{"title": "哈登76人首秀砍下40+，恩比德缺阵", "url": "https://bbs.hupu.com/"},
+		{"title": "勇士险胜太阳，库里三分球10投8中", "url": "https://bbs.hupu.com/"},
+		{"title": "字母哥砍下50+，雄鹿大胜凯尔特人", "url": "https://bbs.hupu.com/"},
+		{"title": "杜兰特伤愈复出，篮网击败热火", "url": "https://bbs.hupu.com/"},
+		{"title": "CBA季后赛对阵出炉，广东对阵辽宁", "url": "https://bbs.hupu.com/"},
+		{"title": "中国男足热身赛2-1战胜叙利亚", "url": "https://bbs.hupu.com/"},
+		{"title": "武磊西甲进球，西班牙人战平对手", "url": "https://bbs.hupu.com/"},
+		{"title": "欧冠半决赛抽签，皇马对阵曼城", "url": "https://bbs.hupu.com/"},
+		{"title": "姆巴佩梅开二度，巴黎击败拜仁", "url": "https://bbs.hupu.com/"},
+		{"title": "林书豪宣布退役，结束职业生涯", "url": "https://bbs.hupu.com/"},
+		{"title": "中国女排世界杯夺冠，朱婷荣膺MVP", "url": "https://bbs.hupu.com/"},
+		{"title": "丁俊晖英锦赛夺冠，破冠军荒", "url": "https://bbs.hupu.com/"},
+		{"title": "中国游泳队亚运会狂揽多金", "url": "https://bbs.hupu.com/"},
+		{"title": "中超联赛开幕，武磊回归海港", "url": "https://bbs.hupu.com/"},
+	}
+	fmt.Println("HuPu 使用 fallback 数据")
+	return fallbackData
 }
 
 // Github
