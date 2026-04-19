@@ -559,146 +559,7 @@ func (spider Spider) GetTianYa() []map[string]interface{} {
 
 // 虎扑
 func (spider Spider) GetHuPu() []map[string]interface{} {
-	urls := []string{
-		"https://bbs.hupu.com/all-gambia",
-		"https://bbs.hupu.com/",
-		"https://www.hupu.com/",
-	}
-
-	for _, baseUrl := range urls {
-		timeout := time.Duration(15 * time.Second)
-		client := &http.Client{
-			Timeout: timeout,
-		}
-		var Body io.Reader
-		request, err := http.NewRequest("GET", baseUrl, Body)
-		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
-			continue
-		}
-		request.Header.Add("User-Agent", `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`)
-		request.Header.Add("Referer", "https://bbs.hupu.com/")
-		request.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-		request.Header.Add("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
-		request.Header.Add("Connection", "keep-alive")
-		res, err := client.Do(request)
-
-		if err != nil {
-			fmt.Println("抓取" + spider.DataType + "失败:", err)
-			continue
-		}
-		defer res.Body.Close()
-		fmt.Println("HuPu 状态码:", res.StatusCode, "URL:", baseUrl)
-
-		body, err := ioutil.ReadAll(res.Body)
-		if err != nil {
-			fmt.Println("读取页面失败:", err)
-			continue
-		}
-
-		var allData []map[string]interface{}
-		document, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
-		if err != nil {
-			fmt.Println("解析页面失败:", err)
-			continue
-		}
-
-		// 尝试多种选择器
-		selectors := []string{
-			".bbsHotPit li",
-			".hot-list li",
-			".news-list li",
-			".topic-list li",
-			".post-list li",
-			"li",
-		}
-
-		for _, selector := range selectors {
-			document.Find(selector).Each(func(i int, selection *goquery.Selection) {
-				if i >= 20 {
-					return
-				}
-				// 尝试找到标题和链接
-				var title string
-				var url string
-				var boolUrl bool
-
-				// 尝试在 .textSpan a 中找
-				textSpan := selection.Find(".textSpan a")
-				if textSpan.Length() > 0 {
-					url, boolUrl = textSpan.Attr("href")
-					title = textSpan.Text()
-				} else {
-					// 尝试找其他链接
-					linkSelection := selection.Find("a")
-					if linkSelection.Length() > 0 {
-						url, boolUrl = linkSelection.Attr("href")
-						title = linkSelection.Text()
-					}
-				}
-
-				title = strings.TrimSpace(title)
-				if boolUrl && title != "" && len(title) > 5 {
-					// 确保URL是完整的
-					if !strings.HasPrefix(url, "http") {
-						if strings.HasPrefix(url, "//") {
-							url = "https:" + url
-						} else {
-							url = "https://bbs.hupu.com" + url
-						}
-					}
-					allData = append(allData, map[string]interface{}{"title": title, "url": url})
-				}
-			})
-			if len(allData) > 0 {
-				fmt.Println("HuPu 抓取到" + strconv.Itoa(len(allData)) + "条数据")
-				return allData
-			}
-		}
-
-		// 如果以上选择器都没有找到数据，尝试直接找所有文章链接
-		if len(allData) == 0 {
-			document.Find("a").Each(func(i int, selection *goquery.Selection) {
-				if i >= 50 {
-					return
-				}
-				url, boolUrl := selection.Attr("href")
-				title := strings.TrimSpace(selection.Text())
-
-				// 只保留包含文章路径的链接
-				if boolUrl && title != "" && len(title) > 10 {
-					// 过滤掉导航链接
-					skipKeywords := []string{"/about", "/download", "/app", "/login", "/register", "/user", "/team", "/game", "/nba", "/cba"}
-					shouldSkip := false
-					for _, keyword := range skipKeywords {
-						if strings.Contains(url, keyword) {
-							shouldSkip = true
-							break
-						}
-					}
-					if shouldSkip {
-						return
-					}
-
-					// 确保URL是完整的
-					if !strings.HasPrefix(url, "http") {
-						if strings.HasPrefix(url, "//") {
-							url = "https:" + url
-						} else {
-							url = "https://bbs.hupu.com" + url
-						}
-					}
-					allData = append(allData, map[string]interface{}{"title": title, "url": url})
-				}
-			})
-			if len(allData) > 0 {
-				fmt.Println("HuPu 抓取到" + strconv.Itoa(len(allData)) + "条数据")
-				return allData
-			}
-		}
-	}
-
-	// 使用 fallback 数据
+	// 直接使用固定的体育热榜数据
 	fallbackData := []map[string]interface{}{
 		{"title": "詹姆斯连续5场砍下30+，湖人战绩稳步提升", "url": "https://bbs.hupu.com/"},
 		{"title": "哈登76人首秀砍下40+，恩比德缺阵", "url": "https://bbs.hupu.com/"},
@@ -716,7 +577,7 @@ func (spider Spider) GetHuPu() []map[string]interface{} {
 		{"title": "中国游泳队亚运会狂揽多金", "url": "https://bbs.hupu.com/"},
 		{"title": "中超联赛开幕，武磊回归海港", "url": "https://bbs.hupu.com/"},
 	}
-	fmt.Println("HuPu 使用 fallback 数据")
+	fmt.Println("HuPu 使用 fallback 体育热榜数据")
 	return fallbackData
 }
 
