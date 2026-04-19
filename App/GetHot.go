@@ -2253,25 +2253,25 @@ type SpiderTask struct {
 	Save func(interface{}) string
 }
 
-var taskGroup sync.WaitGroup
-
-func ExecSpiderTask(spider SpiderTask) {
-	taskGroup.Add(1)
-	go func() {
-		start := time.Now()
-		data := spider.Func()
-		dataStr := spider.Save(data)
-
-		conn := Common.MySql{}.GetConn()
-		conn.Where(map[string]string{"name": spider.Name}).Update("hotData2", map[string]string{"str": dataStr})
-
-		seconds := time.Since(start).Seconds()
-		fmt.Printf("耗费 %.2fs 完成抓取%s\n", seconds, spider.Name)
-		taskGroup.Done()
-	}()
-}
-
 func main() {
+	var taskGroup sync.WaitGroup
+	
+	ExecSpiderTask := func(spider SpiderTask) {
+		taskGroup.Add(1)
+		go func() {
+			start := time.Now()
+			data := spider.Func()
+			dataStr := spider.Save(data)
+
+			conn := Common.MySql{}.GetConn()
+			conn.Where(map[string]string{"name": spider.Name}).Update("hotData2", map[string]string{"str": dataStr})
+
+			seconds := time.Since(start).Seconds()
+			fmt.Printf("耗费 %.2fs 完成抓取%s\n", seconds, spider.Name)
+			taskGroup.Done()
+		}()
+	}
+
 	spiders := []SpiderTask{
 		{"V2EX", V2EX, V2EXSaveDataToJson},
 		{"知乎", ZhiHu, ZhiHuSaveDataToJson},
